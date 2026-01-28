@@ -28,6 +28,7 @@ import {
 import { Trash2, Link as LinkIcon, ExternalLink, Copy, Check, Image, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { deleteTradeImage, getTradeImageSignedUrl, uploadTradeImage } from "@/app/data/tradingRepo";
+import { CloseTradeModal } from "@/app/components/CloseTradeModal";
 
 interface TradeRowProps {
   trade: Trade;
@@ -41,6 +42,34 @@ export function TradeRow({ trade, onUpdate, onDelete, isReadOnly }: TradeRowProp
   const [copiedAfter, setCopiedAfter] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string>("");
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const estado = trade.estado ?? "Borrador";
+  const isDraft = estado === "Borrador";
+
+  const isTradeComplete =
+    trade.par.trim() !== "" &&
+    trade.confluencias.trim() !== "" &&
+    trade.linkTradingViewAntes.trim() !== "" &&
+    trade.imagenURL.trim() !== "";
+
+  const handleTradeUpdate = (updatedTrade: Trade) => {
+    onUpdate(updatedTrade);
+  };
+
+  const handleSaveTrade = () => {
+    const now = new Date();
+    const horaApertura = now.toTimeString().slice(0, 5);
+    const fechaBase = trade.fecha.split(" ")[0];
+    const fechaConHora = `${fechaBase} ${horaApertura}`;
+
+    handleTradeUpdate({
+      ...trade,
+      fecha: trade.fecha.includes(":") ? trade.fecha : fechaConHora,
+      estado: "Abierto",
+    });
+    setShowSaveConfirmation(false);
+  };
 
   const handleCopyLink = (link: string, type: "before" | "after") => {
     navigator.clipboard.writeText(link);
@@ -73,6 +102,10 @@ export function TradeRow({ trade, onUpdate, onDelete, isReadOnly }: TradeRowProp
       })
       .catch((e) => {
         if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.toLowerCase().includes("aborted") || msg.toLowerCase().includes("abort")) {
+          return;
+        }
         console.error(e);
         setImagePreviewUrl("");
       });
@@ -127,7 +160,7 @@ export function TradeRow({ trade, onUpdate, onDelete, isReadOnly }: TradeRowProp
   };
 
   return (
-    <div className="grid grid-cols-14 gap-2 p-3 border-b border-gray-200 dark:border-gray-700 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors text-sm" style={{ gridTemplateColumns: 'repeat(14, minmax(0, 1fr))' }}>
+    <div className="grid grid-cols-16 gap-2 p-3 border-b border-gray-200 dark:border-gray-700 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors text-sm" style={{ gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}>
       {/* Trade # */}
       <div className="col-span-1 flex items-center">
         <span className="font-medium text-gray-900 dark:text-white">
@@ -141,10 +174,25 @@ export function TradeRow({ trade, onUpdate, onDelete, isReadOnly }: TradeRowProp
           type="text"
           value={trade.fecha}
           onChange={(e) => onUpdate({ ...trade, fecha: e.target.value })}
-          disabled={isReadOnly}
+          disabled={isReadOnly || estado === "Cerrado"}
           className="h-8 text-xs"
           placeholder="DD/MM/YYYY"
         />
+      </div>
+
+      {/* Estado */}
+      <div className="col-span-1 flex items-center">
+        <Badge
+          className={
+            estado === "Cerrado"
+              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 text-xs"
+              : estado === "Abierto"
+              ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100 text-xs"
+              : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100 text-xs"
+          }
+        >
+          {estado}
+        </Badge>
       </div>
 
       {/* Par */}
@@ -166,7 +214,7 @@ export function TradeRow({ trade, onUpdate, onDelete, isReadOnly }: TradeRowProp
           onValueChange={(value: "Buy" | "Sell") =>
             onUpdate({ ...trade, buySell: value })
           }
-          disabled={isReadOnly}
+          disabled={isReadOnly || estado === "Cerrado"}
         >
           <SelectTrigger className="h-8 text-xs">
             <SelectValue />
@@ -220,68 +268,6 @@ export function TradeRow({ trade, onUpdate, onDelete, isReadOnly }: TradeRowProp
         </Select>
       </div>
 
-      {/* Resultado */}
-      <div className="col-span-1 flex items-center">
-        <Select
-          value={trade.resultado}
-          onValueChange={(value: "Win" | "Loss" | "Break Even") =>
-            onUpdate({ ...trade, resultado: value })
-          }
-          disabled={isReadOnly}
-        >
-          <SelectTrigger className="h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Win">
-              <span className="text-green-600 dark:text-green-400 font-medium">
-                Win
-              </span>
-            </SelectItem>
-            <SelectItem value="Loss">
-              <span className="text-red-600 dark:text-red-400 font-medium">
-                Loss
-              </span>
-            </SelectItem>
-            <SelectItem value="Break Even">
-              <span className="text-gray-600 dark:text-gray-300 font-medium">
-                Break Even
-              </span>
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* R:R Final - NUEVO */}
-      <div className="col-span-1 flex items-center">
-        <Input
-          type="text"
-          value={trade.riesgoBeneficioFinal || ""}
-          onChange={(e) => onUpdate({ ...trade, riesgoBeneficioFinal: e.target.value })}
-          disabled={isReadOnly}
-          className={`h-8 text-xs font-medium ${
-            trade.resultado === "Win" 
-              ? "text-green-600 dark:text-green-400" 
-              : trade.resultado === "Loss"
-              ? "text-red-600 dark:text-red-400"
-              : ""
-          }`}
-          placeholder={trade.resultado === "Win" ? "Riesgo beneficio" : "Riesgo pérdida"}
-        />
-      </div>
-
-      {/* Duración - NUEVO */}
-      <div className="col-span-1 flex items-center">
-        <Input
-          type="text"
-          value={trade.tiempoDuracion || ""}
-          onChange={(e) => onUpdate({ ...trade, tiempoDuracion: e.target.value })}
-          disabled={isReadOnly}
-          className="h-8 text-xs"
-          placeholder="2h 30m"
-        />
-      </div>
-
       {/* Confluencias */}
       <div className="col-span-2 flex items-center">
         <Input
@@ -294,20 +280,130 @@ export function TradeRow({ trade, onUpdate, onDelete, isReadOnly }: TradeRowProp
         />
       </div>
 
-      {/* Notas */}
-      <div className="col-span-2 flex items-center">
-        <Input
-          type="text"
-          value={trade.notas}
-          onChange={(e) => onUpdate({ ...trade, notas: e.target.value })}
-          disabled={isReadOnly}
-          className="h-8 text-xs"
-          placeholder="Notas del trade..."
-        />
+      {/* Resultado */}
+      <div className="col-span-1 flex items-center">
+        {estado === "Cerrado" ? (
+          <Badge
+            className={
+              trade.resultado === "Win"
+                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100 text-xs"
+                : trade.resultado === "Loss"
+                ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100 text-xs"
+                : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 text-xs"
+            }
+          >
+            {trade.resultado === "Break Even" ? "BE" : trade.resultado}
+          </Badge>
+        ) : (
+          <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+        )}
+      </div>
+
+      {/* R:R Final - NUEVO */}
+      <div className="col-span-1 flex items-center">
+        {estado === "Cerrado" ? (
+          <span className="text-xs font-medium text-gray-900 dark:text-white">
+            {trade.riesgoBeneficioFinal || "—"}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+        )}
+      </div>
+
+      {/* Duración - NUEVO */}
+      <div className="col-span-1 flex items-center">
+        {estado === "Cerrado" ? (
+          <span className="text-xs text-gray-600 dark:text-gray-400">
+            {trade.tiempoDuracion || "—"}
+          </span>
+        ) : estado === "Abierto" ? (
+          <span className="text-xs text-orange-600 dark:text-orange-400 italic">
+            En curso
+          </span>
+        ) : (
+          <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+        )}
+      </div>
+
+      {/* Imagen */}
+      <div className="col-span-1 flex items-center justify-center">
+        {trade.imagenURL ? (
+          <Image className="h-4 w-4 text-green-600 dark:text-green-400" />
+        ) : (
+          <Image className="h-4 w-4 text-gray-300 dark:text-gray-600" />
+        )}
+      </div>
+
+      {/* Link Antes */}
+      <div className="col-span-1 flex items-center justify-center">
+        {trade.linkTradingViewAntes ? (
+          <LinkIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+        ) : (
+          <LinkIcon className="h-4 w-4 text-gray-300 dark:text-gray-600" />
+        )}
       </div>
 
       {/* Acciones */}
-      <div className="col-span-1 flex items-center gap-1">
+      <div className="col-span-2 flex items-center gap-1">
+        {/* Guardar - solo borrador completo */}
+        {!isReadOnly && estado === "Borrador" && isTradeComplete && (
+          <AlertDialog open={showSaveConfirmation} onOpenChange={setShowSaveConfirmation}>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white border-green-600"
+              >
+                Guardar
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>¿Guardar trade?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  El trade pasará a estado "Abierto".
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleSaveTrade}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  Guardar Trade
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+
+        {/* Cerrar - solo abierto */}
+        {!isReadOnly && estado === "Abierto" && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs bg-[#416E87] hover:bg-[#355a6d] text-white border-[#416E87]"
+              onClick={() => setShowCloseModal(true)}
+            >
+              Cerrar Trade
+            </Button>
+
+            <CloseTradeModal
+              trade={trade}
+              onTradeClose={(updated) => handleTradeUpdate(updated)}
+              onClose={() => setShowCloseModal(false)}
+              open={showCloseModal}
+              onOpenChange={setShowCloseModal}
+            />
+          </>
+        )}
+
+        {/* Cerrado - solo lectura */}
+        {estado === "Cerrado" && (
+          <span className="text-xs text-gray-500 dark:text-gray-400 italic">Cerrado</span>
+        )}
+
         {/* TradingView Links Popover */}
         <Popover>
           <PopoverTrigger asChild>
@@ -390,6 +486,18 @@ export function TradeRow({ trade, onUpdate, onDelete, isReadOnly }: TradeRowProp
                   className="hidden"
                   accept="image/*"
                   onChange={handleImageUpload}
+                />
+              </div>
+
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+                <h4 className="font-medium text-sm mb-3">Notas</h4>
+                <Input
+                  type="text"
+                  value={trade.notas}
+                  onChange={(e) => onUpdate({ ...trade, notas: e.target.value })}
+                  disabled={isReadOnly}
+                  placeholder="Notas del trade..."
+                  className="h-8 text-xs"
                 />
               </div>
 

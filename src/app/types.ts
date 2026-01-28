@@ -3,6 +3,7 @@ export interface Trade {
   id: string;
   tradeNumber: string;
   fecha: string; // DD/MM/YYYY
+  estado?: "Borrador" | "Abierto" | "Cerrado";
   par: string; // EUR/USD, etc
   buySell: "Buy" | "Sell";
   sesion: "London" | "New York" | "Asian" | "Sydney";

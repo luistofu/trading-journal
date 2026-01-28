@@ -10,6 +10,7 @@ import { Progress } from "@/app/components/ui/progress";
 import {
   createTrade,
   deleteTrade,
+  deleteTradeAndRenumber,
   getMonthIdByQuarterAndName,
   updateTrade,
   updateTradingMonth,
@@ -79,15 +80,22 @@ export function MonthSection({
     const trade = monthData.trades[index];
     if (!trade) return;
 
+    const deletedNumber = Number(trade.tradeNumber);
     onUpdate({
       ...monthData,
-      trades: monthData.trades.filter((_, i) => i !== index),
+      trades: monthData.trades
+        .filter((_, i) => i !== index)
+        .map((t, i) => ({ ...t, tradeNumber: String(i + 1) })),
     });
 
     if (isReadOnly) return;
 
     try {
-      await deleteTrade(trade.id);
+      if (Number.isFinite(deletedNumber)) {
+        await deleteTradeAndRenumber(trade.id);
+      } else {
+        await deleteTrade(trade.id);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -236,21 +244,23 @@ export function MonthSection({
       {/* Trades Table */}
       {monthData.trades.length > 0 ? (
         <div className="overflow-x-auto">
-          <div className="min-w-[1400px]">
+          <div className="min-w-[1600px]">
             {/* Table Header */}
-            <div className="grid gap-2 p-3 bg-gray-100 dark:bg-gray-800 rounded-t-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 sticky top-0" style={{ gridTemplateColumns: 'repeat(14, minmax(0, 1fr))' }}>
+            <div className="grid gap-2 p-3 bg-gray-100 dark:bg-gray-800 rounded-t-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300 sticky top-0" style={{ gridTemplateColumns: 'repeat(16, minmax(0, 1fr))' }}>
               <div className="col-span-1">Trade #</div>
               <div className="col-span-1">Fecha</div>
+              <div className="col-span-1">Estado</div>
               <div className="col-span-1">Par</div>
               <div className="col-span-1">Buy/Sell</div>
               <div className="col-span-1">Sesión</div>
               <div className="col-span-1">Riesgo %</div>
+              <div className="col-span-2">Confluencias</div>
               <div className="col-span-1">Resultado</div>
               <div className="col-span-1">R:R / Beneficio</div>
               <div className="col-span-1">Duración</div>
-              <div className="col-span-2">Confluencias</div>
-              <div className="col-span-2">Notas</div>
-              <div className="col-span-1">Acciones</div>
+              <div className="col-span-1">Imagen</div>
+              <div className="col-span-1">Link Antes</div>
+              <div className="col-span-2">Acciones</div>
             </div>
 
             {/* Table Rows */}

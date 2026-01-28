@@ -23,6 +23,7 @@ type TradeRow = {
   month_id: string;
   trade_number: number;
   fecha: string | null;
+  estado?: string | null;
   par: string;
   buy_sell: "Buy" | "Sell";
   sesion: "London" | "New York" | "Asian" | "Sydney";
@@ -80,8 +81,8 @@ function uiDateToDbDate(value: string): string | null {
   // If already YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
 
-  // Accept DD/MM/YYYY (current UI placeholder)
-  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  // Accept DD/MM/YYYY (current UI placeholder) and DD/MM/YYYY HH:MM (used when opening trades)
+  const m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+\d{1,2}:\d{2})?$/);
   if (!m) return null;
 
   const dd = m[1].padStart(2, "0");
@@ -106,6 +107,7 @@ function mapTradeRowToUi(row: TradeRow): Trade {
     id: row.id,
     tradeNumber: String(row.trade_number),
     fecha: dbDateToUiDate(row.fecha),
+    estado: (row.estado as Trade["estado"]) ?? "Borrador",
     par: row.par ?? "",
     buySell: row.buy_sell,
     sesion: row.sesion,
@@ -204,7 +206,7 @@ export async function getTradingQuarterBundle(year: number, quarter: 1 | 2 | 3 |
   const { data: trades, error: tradesError } = await supabase
     .from("trades")
     .select(
-      "id, month_id, trade_number, fecha, par, buy_sell, sesion, riesgo_porcentaje, resultado, riesgo_beneficio_final, tiempo_duracion, confluencias, notas, imagen_url, link_tradingview_antes, link_tradingview_despues"
+      "id, month_id, trade_number, fecha, estado, par, buy_sell, sesion, riesgo_porcentaje, resultado, riesgo_beneficio_final, tiempo_duracion, confluencias, notas, imagen_url, link_tradingview_antes, link_tradingview_despues"
     )
     .in("month_id", monthIds)
     .order("trade_number", { ascending: true });
@@ -262,6 +264,8 @@ export async function updateTradingMonth(
 export async function createTrade(monthId: string): Promise<Trade> {
   await getUserId();
 
+  const today = new Date().toISOString().slice(0, 10);
+
   const { data: maxRow, error: maxError } = await supabase
     .from("trades")
     .select("trade_number")
@@ -279,7 +283,8 @@ export async function createTrade(monthId: string): Promise<Trade> {
     .insert({
       month_id: monthId,
       trade_number: nextTradeNumber,
-      fecha: null,
+      fecha: today,
+      estado: "Borrador",
       par: "",
       buy_sell: "Buy",
       sesion: "London",
@@ -294,7 +299,7 @@ export async function createTrade(monthId: string): Promise<Trade> {
       link_tradingview_despues: "",
     })
     .select(
-      "id, month_id, trade_number, fecha, par, buy_sell, sesion, riesgo_porcentaje, resultado, riesgo_beneficio_final, tiempo_duracion, confluencias, notas, imagen_url, link_tradingview_antes, link_tradingview_despues"
+      "id, month_id, trade_number, fecha, estado, par, buy_sell, sesion, riesgo_porcentaje, resultado, riesgo_beneficio_final, tiempo_duracion, confluencias, notas, imagen_url, link_tradingview_antes, link_tradingview_despues"
     )
     .single();
 
@@ -321,13 +326,14 @@ export async function updateTrade(tradeId: string, patch: Partial<Trade>): Promi
   if (patch.imagenURL !== undefined) update.imagen_url = patch.imagenURL;
   if (patch.linkTradingViewAntes !== undefined) update.link_tradingview_antes = patch.linkTradingViewAntes;
   if (patch.linkTradingViewDespues !== undefined) update.link_tradingview_despues = patch.linkTradingViewDespues;
+  if (patch.estado !== undefined) update.estado = patch.estado;
 
   const { data: updated, error } = await supabase
     .from("trades")
     .update(update)
     .eq("id", tradeId)
     .select(
-      "id, month_id, trade_number, fecha, par, buy_sell, sesion, riesgo_porcentaje, resultado, riesgo_beneficio_final, tiempo_duracion, confluencias, notas, imagen_url, link_tradingview_antes, link_tradingview_despues"
+      "id, month_id, trade_number, fecha, estado, par, buy_sell, sesion, riesgo_porcentaje, resultado, riesgo_beneficio_final, tiempo_duracion, confluencias, notas, imagen_url, link_tradingview_antes, link_tradingview_despues"
     )
     .single();
 
@@ -338,8 +344,70 @@ export async function updateTrade(tradeId: string, patch: Partial<Trade>): Promi
 export async function deleteTrade(tradeId: string): Promise<void> {
   await getUserId();
 
+  const { data: existing, error: selectError } = await supabase
+    .from("trades")
+    .select("imagen_url")
+    .eq("id", tradeId)
+    .maybeSingle();
+
+  if (selectError) throw new TradingRepoError(selectError.message);
+
+  const imagePath = (existing as { imagen_url?: string | null } | null)?.imagen_url ?? "";
+  if (imagePath && !imagePath.startsWith("data:")) {
+    try {
+      await deleteTradeImage(imagePath);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   const { error } = await supabase.from("trades").delete().eq("id", tradeId);
   if (error) throw new TradingRepoError(error.message);
+}
+
+export async function deleteTradeAndRenumber(tradeId: string): Promise<void> {
+  await getUserId();
+
+  const { data: toDelete, error: selectError } = await supabase
+    .from("trades")
+    .select("id, month_id, trade_number, imagen_url")
+    .eq("id", tradeId)
+    .single();
+
+  if (selectError) throw new TradingRepoError(selectError.message);
+
+  const monthId = (toDelete as { month_id: string }).month_id;
+  const deletedNumber = (toDelete as { trade_number: number }).trade_number;
+
+  const imagePath = (toDelete as { imagen_url?: string | null }).imagen_url ?? "";
+  if (imagePath && !imagePath.startsWith("data:")) {
+    try {
+      await deleteTradeImage(imagePath);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  const { error: deleteError } = await supabase.from("trades").delete().eq("id", tradeId);
+  if (deleteError) throw new TradingRepoError(deleteError.message);
+
+  const { data: after, error: afterError } = await supabase
+    .from("trades")
+    .select("id, trade_number")
+    .eq("month_id", monthId)
+    .gt("trade_number", deletedNumber)
+    .order("trade_number", { ascending: true });
+
+  if (afterError) throw new TradingRepoError(afterError.message);
+
+  for (const row of (after ?? []) as Array<{ id: string; trade_number: number }>) {
+    const { error: updateError } = await supabase
+      .from("trades")
+      .update({ trade_number: row.trade_number - 1 })
+      .eq("id", row.id);
+
+    if (updateError) throw new TradingRepoError(updateError.message);
+  }
 }
 
 export async function uploadTradeImage(tradeId: string, file: File): Promise<{ path: string }> {
